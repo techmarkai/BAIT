@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "BAIT",
+        "description": "Paste your Firebase service-account JSON to enable push notifications.",
+        "data": { "service_account": "Service account JSON" }
+      }
+    },
+    "error": { "invalid_credentials": "That service-account JSON is invalid." },
+    "abort": { "single_instance_allowed": "BAIT is already configured." }
+  }
+}

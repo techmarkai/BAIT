@@ -1,0 +1,12 @@
+{
+  "domain": "bait",
+  "name": "BAIT",
+  "codeowners": ["@techmarkai"],
+  "config_flow": true,
+  "dependencies": ["http"],
+  "documentation": "https://getbait.app",
+  "iot_class": "cloud_push",
+  "issue_tracker": "https://github.com/techmarkai/BAIT/issues",
+  "requirements": ["firebase-admin>=6.5.0"],
+  "version": "0.1.0"
+}
