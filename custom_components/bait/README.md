@@ -1,16 +1,16 @@
 # BAIT Home Assistant Integration
 
-Registers BAIT mobile devices and sends push notifications via Firebase Cloud
-Messaging.
+Registers BAIT mobile devices and sends push notifications via the hosted BAIT
+relay (Firebase Cloud Messaging). No Firebase project or key required.
 
 ## Install
 Copy `custom_components/bait/` into your Home Assistant `config/custom_components/`
 directory and restart HA.
 
 ## Configure
-Settings → Devices & Services → Add Integration → **BAIT**. Paste your Firebase
-service-account JSON (from the Firebase console → Project settings → Service
-accounts → Generate new private key).
+Settings → Devices & Services → Add Integration → **BAIT**. No input is needed —
+the integration registers this Home Assistant with the BAIT push service
+automatically.
 
 ## Endpoints (authenticated with a normal HA token)
 - `POST /api/bait/register` — `{device_id, device_name, push_token, platform, app_version}`
