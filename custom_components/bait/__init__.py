@@ -1,22 +1,33 @@
 """The BAIT integration."""
 from __future__ import annotations
 
-import firebase_admin
-
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.util import slugify
 
 from .const import (
-    CONF_SERVICE_ACCOUNT,
+    CONF_INSTANCE_ID,
+    CONF_INSTANCE_KEY,
     DATA_ENTRIES,
     DATA_VIEWS_REGISTERED,
     DOMAIN,
 )
 from .http_api import RegisterView, UnregisterView
 from .notify import NOTIFY_DOMAIN, async_register_device_services
-from .push import BaitPush, build_firebase_app
+from .push import BaitPush
 from .store import BaitDeviceStore
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Handle migration of an old config entry.
+
+    v1 entries stored a Firebase service-account JSON; the relay model (v2)
+    stores per-install relay credentials instead. There is no data path from
+    one to the other, so we fail migration cleanly — Home Assistant then
+    surfaces a "reconfigure" state and the user removes and re-adds BAIT (the
+    documented breaking-change upgrade), rather than a raw MIGRATION_ERROR.
+    """
+    return False
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -27,25 +38,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     store = BaitDeviceStore(hass)
     await store.async_load()
 
-    app = await hass.async_add_executor_job(
-        build_firebase_app, entry.data[CONF_SERVICE_ACCOUNT], entry.entry_id
+    push = BaitPush(
+        hass,
+        entry.data[CONF_INSTANCE_ID],
+        entry.data[CONF_INSTANCE_KEY],
+        prune=store.async_prune_token,
     )
-
-    async def _prune(token: str) -> None:
-        await store.async_prune_token(token)
-
-    def _prune_sync(token: str) -> None:
-        # Called from a firebase executor thread: schedule the async store write
-        # on the event loop in a thread-safe way.
-        hass.add_job(_prune, token)
-
-    push = BaitPush(hass, app, prune=_prune_sync)
 
     entries[entry.entry_id] = {
         "store": store,
         "push": push,
         "entry_id": entry.entry_id,
-        "app": app,
     }
 
     if not domain_data.get(DATA_VIEWS_REGISTERED):
@@ -69,7 +72,7 @@ def _service_names_for(store: BaitDeviceStore) -> set[str]:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a BAIT config entry: remove notify services and the firebase app."""
+    """Unload a BAIT config entry: remove its notify services."""
     ctx = hass.data.get(DOMAIN, {}).get(DATA_ENTRIES, {}).pop(entry.entry_id, None)
     if ctx is None:
         return True
@@ -77,9 +80,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     for name in _service_names_for(ctx["store"]):
         if hass.services.has_service(NOTIFY_DOMAIN, name):
             hass.services.async_remove(NOTIFY_DOMAIN, name)
-
-    app = ctx.get("app")
-    if app is not None:
-        await hass.async_add_executor_job(firebase_admin.delete_app, app)
 
     return True
