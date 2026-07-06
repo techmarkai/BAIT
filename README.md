@@ -1,9 +1,9 @@
 # BAIT — Home Assistant Integration
 
 Push notifications for the BAIT mobile app, delivered from Home Assistant via
-Firebase Cloud Messaging. The integration registers BAIT devices over an
-authenticated HA endpoint, stores their FCM tokens, and exposes `notify`
-services for automations.
+Firebase Cloud Messaging. Notifications are relayed through the hosted BAIT push
+service, so **you don't need your own Firebase project or any keys** — install,
+add the integration, and it works.
 
 ## Install via HACS
 
@@ -15,10 +15,10 @@ services for automations.
 ## Configure
 
 1. **Settings → Devices & Services → Add Integration → BAIT.**
-2. Paste your Firebase **service-account JSON** (Firebase console → Project
-   settings → Service accounts → *Generate new private key*).
+2. There is nothing to fill in — just submit. The integration registers this
+   Home Assistant with the BAIT push service automatically.
 
-The BAIT app then registers automatically over `/api/bait/register` using its
+The BAIT app then registers your devices over `/api/bait/register` using their
 existing Home Assistant login — no extra configuration.
 
 ## Notify services
@@ -40,6 +40,13 @@ data:
     category: security
     entity_id: lock.front_door
 ```
+
+## Upgrading from 0.1.x
+
+0.2.0 replaces the "bring your own Firebase service-account JSON" setup with the
+hosted relay. There is no automatic migration: **remove the old BAIT integration
+and add it again** (Settings → Devices & Services). No Firebase key is needed
+anymore.
 
 ## License
 
