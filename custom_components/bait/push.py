@@ -1,82 +1,37 @@
-"""Sending push notifications via the Firebase Admin SDK."""
+"""Send push notifications by POSTing to the central BAIT relay."""
 from __future__ import annotations
 
-import json
+import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
-import firebase_admin
-from firebase_admin import credentials, messaging
+import aiohttp
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+from .const import RELAY_URL
 
 _LOGGER = logging.getLogger(__name__)
 
 
-def build_firebase_app(service_account_json: str, name: str):
-    """Initialize (or return) a named firebase_admin app from a JSON string."""
-    cred = credentials.Certificate(json.loads(service_account_json))
-    try:
-        return firebase_admin.get_app(name)
-    except ValueError:
-        return firebase_admin.initialize_app(cred, name=name)
-
-
-def build_message(
-    token: str,
-    title: str | None,
-    body: str | None,
-    data: dict,
-) -> messaging.Message:
-    """Build a fully-configured FCM message for one token.
-
-    Adds a high-priority Android config on the payload's per-category channel
-    (falling back to "other"), a big-picture image when provided, and an APNs
-    config enabling rich media (mutable-content) + action categories on iOS.
-    The `data` map is forwarded verbatim (string-coerced, as FCM requires).
-    """
-    str_data = {k: str(v) for k, v in (data or {}).items()}
-    category = str_data.get("category") or "other"
-    image = str_data.get("image")
-
-    return messaging.Message(
-        token=token,
-        notification=messaging.Notification(title=title, body=body, image=image),
-        data=str_data,
-        android=messaging.AndroidConfig(
-            priority="high",
-            notification=messaging.AndroidNotification(
-                channel_id=category,
-                image=image,
-            ),
-        ),
-        apns=messaging.APNSConfig(
-            payload=messaging.APNSPayload(
-                aps=messaging.Aps(
-                    sound="default",
-                    mutable_content=True,
-                    category=category,
-                ),
-            ),
-        ),
-    )
-
-
 class BaitPush:
-    """Sends FCM messages for stored device tokens.
+    """Relay client. Sends each token's notification to the BAIT relay.
 
-    `app` is the initialized firebase_admin app. `prune` is called with a token
-    string when FCM reports it is no longer registered.
+    `prune` is an awaitable called with a token when the relay reports it is no
+    longer registered.
     """
 
     def __init__(
         self,
         hass: HomeAssistant,
-        app,
-        prune: Callable[[str], object],
+        instance_id: str,
+        instance_key: str,
+        prune: Callable[[str], Awaitable[None]],
     ) -> None:
         self._hass = hass
-        self._app = app
+        self._instance_id = instance_id
+        self._instance_key = instance_key
         self._prune = prune
 
     async def async_send(
@@ -90,22 +45,29 @@ class BaitPush:
         if not tokens:
             return
 
-        messages = [build_message(token, title, body, data) for token in tokens]
-        try:
-            batch = await self._hass.async_add_executor_job(self._send_each, messages)
-        except Exception:  # noqa: BLE001 - whole-batch failure: log, no prune, not fatal
-            _LOGGER.exception("BAIT push batch send failed")
-            return
-
-        for token, response in zip(tokens, batch.responses):
-            if response.success:
+        session = async_get_clientsession(self._hass)
+        for token in tokens:
+            payload = {
+                "instance_id": self._instance_id,
+                "instance_key": self._instance_key,
+                "token": token,
+                "title": title,
+                "body": body,
+                "data": data or {},
+            }
+            try:
+                resp = await session.post(
+                    f"{RELAY_URL}/send",
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=10),
+                )
+                result = await resp.json()
+            except (aiohttp.ClientError, asyncio.TimeoutError):
+                _LOGGER.exception("BAIT relay send failed")
                 continue
-            exc = response.exception
-            if isinstance(exc, messaging.UnregisteredError):
-                _LOGGER.info("Pruning unregistered BAIT push token")
-                self._prune(token)
-            else:
-                _LOGGER.error("BAIT push send failed for a token: %s", exc)
 
-    def _send_each(self, messages: list[messaging.Message]):
-        return messaging.send_each(messages, app=self._app)
+            if result.get("error") == "unregistered":
+                _LOGGER.info("Pruning unregistered BAIT push token")
+                await self._prune(token)
+            elif not result.get("success"):
+                _LOGGER.error("BAIT relay send error: %s", result.get("error"))
